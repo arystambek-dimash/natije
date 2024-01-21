@@ -1,3 +1,6 @@
+import asyncio
+from asgiref.sync import sync_to_async
+
 from rest_framework import status, generics
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.views import APIView
@@ -38,24 +41,16 @@ class LogoutView(APIView):
         return Response({"status": "Сау болыңыз!!"}, status=status.HTTP_200_OK)
 
 
-class GetProfileView(generics.RetrieveAPIView):
+class GetUpdateDeleteProfileView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = (IsAuthenticated,)
-    serializer_class = ProfileSerializer
+    serializer_class_map = {"GET": ProfileSerializer, "PATCH": ProfileUpdateSerializer, "DELETE": UserSerializer}
     queryset = Profile.objects.all()
+
+    def get_serializer_class(self):
+        return self.serializer_class_map.get(self.request.method.upper())
 
     def get_object(self):
         profile, created = Profile.objects.get_or_create(user=self.request.user)
-        return profile
-
-
-class UpdateDeleteProfileView(generics.RetrieveUpdateDestroyAPIView):
-    permission_classes = (IsAuthenticated,)
-    serializer_class = ProfileUpdateSerializer
-    queryset = Profile.objects.all()
-    http_method_names = ['put', 'delete']
-
-    def get_object(self):
-        profile = Profile.objects.get(user=self.request.user)
         return profile
 
     def update(self, request, *args, **kwargs):

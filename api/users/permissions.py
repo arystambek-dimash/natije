@@ -1,3 +1,4 @@
+from rest_framework import permissions
 from rest_framework.permissions import BasePermission
 from rest_framework.exceptions import PermissionDenied
 
@@ -12,15 +13,11 @@ class IsTeacherUser(BasePermission):
 
 
 class IsOwnerUser(BasePermission):
+    def has_permission(self, request, view):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return True
+
     def has_object_permission(self, request, view, obj):
         user = request.user
-        if hasattr(obj, "user") and obj.user == user:
-            return True
-        elif hasattr(obj, "course") and obj.course.user == user:
-            return True
-        elif hasattr(obj, "course_theme") and obj.course_theme.course.user == user:
-            return True
-        elif hasattr(obj, "lesson") and obj.lesson.course_theme.course.user == user:
-            return True
-
-        return False
+        return obj.user == user

@@ -1,4 +1,3 @@
-from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 
@@ -61,5 +60,5 @@ class User(AbstractUser):
 
 class Profile(models.Model):
     profile_picture = models.ImageField(upload_to='medias/profile_pictures', null=True)
-    test_limit = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(30)], default=0)
+    test_limit = models.DateTimeField(auto_now_add=True)
     user = models.OneToOneField(User, on_delete=models.CASCADE)

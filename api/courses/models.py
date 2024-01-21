@@ -27,6 +27,7 @@ class Course(models.Model):
 
 class CourseTheme(models.Model):
     title = models.CharField(max_length=255, null=False, unique=True, db_index=True)
+    description = models.CharField(max_length=255, blank=True)
     date_published = models.DateTimeField(auto_now_add=True)
     course = models.ForeignKey(Course, on_delete=models.CASCADE)
 
@@ -36,8 +37,7 @@ class CourseTheme(models.Model):
 
 class Lesson(models.Model):
     title = models.CharField(max_length=255, null=False, db_index=True)
-    lesson_number = models.IntegerField(validators=[MinValueValidator(0)])
-    date_published = models.DateTimeField(auto_now_add=True)
+    lesson_number = models.IntegerField(validators=[MinValueValidator(0)], db_index=True, unique=True, null=True)
     video_link = models.URLField(null=False)
     duration = models.DurationField()
     is_prime = models.BooleanField(default=True)

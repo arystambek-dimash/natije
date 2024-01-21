@@ -6,14 +6,28 @@ from .models import Course, CourseTheme, Lesson, LessonMaterial
 
 
 class CourseSerializer(serializers.ModelSerializer):
-    user = serializers.ReadOnlyField(source='user.email')
     number_of_lessons = serializers.SerializerMethodField()
     duration = serializers.SerializerMethodField()
+    is_owner = serializers.SerializerMethodField()
 
     class Meta:
         model = Course
-        fields = '__all__'
-        read_only_fields = ['user', 'number_of_lessons', 'duration', 'bought_user']
+        fields = ['id',
+                  'image',
+                  'name',
+                  'description',
+                  'price',
+                  'duration',
+                  'number_of_lessons',
+                  'created_at',
+                  'is_owner']
+        read_only_fields = ['user', 'number_of_lessons', 'duration', 'bought_users']
+
+    def get_is_owner(self, obj):
+        request = self.context.get("request")
+        if request:
+            return obj.user == request.user
+        return False
 
     def get_number_of_lessons(self, obj):
         try:
@@ -76,16 +90,57 @@ class LessonSerializer(serializers.ModelSerializer):
     class Meta:
         model = Lesson
         fields = '__all__'
-        read_only_fields = ['course_theme', 'lesson_number', 'date_published', 'duration']
+        read_only_fields = ['course_theme', 'duration']
 
     def create(self, validated_data):
         video_link = validated_data.get('video_link')
-        youtube = YouTube(video_link)
-        duration_seconds = youtube.length
-        video_time = datetime.timedelta(seconds=duration_seconds)
 
-        lesson = Lesson.objects.create(**validated_data, duration=video_time)
+        if not video_link:
+            raise serializers.ValidationError({'video_link': ['Video link is required.']})
+        try:
+            youtube = YouTube(video_link)
+            duration_seconds = youtube.length
+            print(duration_seconds)
+            video_time = datetime.timedelta(seconds=duration_seconds)
+        except Exception as e:
+            raise serializers.ValidationError({'video_link': [str(e)]})
+
+        lesson_number = validated_data.get('lesson_number')
+        if lesson_number:
+            lesson, created = Lesson.objects.get_or_create(lesson_number=lesson_number,
+                                                           defaults={'duration': video_time, **validated_data})
+            if created:
+                return lesson
+            else:
+                raise serializers.ValidationError({'message': ['Қате. Бұл нөмерлі сабақ бар!']})
+        lesson = Lesson.objects.create(duration=video_time, **validated_data)
         return lesson
+
+    def update(self, instance, validated_data):
+        video_link = validated_data.get('video_link')
+
+        if not video_link:
+            raise serializers.ValidationError({'video_link': ['Video link is required.']})
+
+        try:
+            youtube = YouTube(video_link)
+            duration_seconds = youtube.length
+            instance.duration = datetime.timedelta(seconds=duration_seconds)
+        except Exception as e:
+            raise serializers.ValidationError({'video_link': [str(e)]})
+
+        instance.title = validated_data.get('title', instance.title)
+        lesson_number = validated_data.get('lesson_number')
+        if lesson_number is not None:
+            if not isinstance(lesson_number, int) or lesson_number < 0:
+                raise serializers.ValidationError({'lesson_number': ['Lesson number must be a non-negative integer.']})
+            lesson = Lesson.objects.get(lesson_number=lesson_number)
+            if lesson:
+                raise serializers.ValidationError({"message": "Қате. Бұл нөмерлі сабақ бар!"})
+            instance.lesson_number = lesson_number
+
+        instance.save()
+        return instance
 
 
 class LessonMaterialSerializer(serializers.ModelSerializer):

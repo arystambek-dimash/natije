@@ -1,14 +1,14 @@
-from django.http import Http404
-from rest_framework import generics, status
+import datetime
+
+from rest_framework import generics, status, mixins
 from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
 from api.courses.models import Course, CourseTheme, Lesson, LessonMaterial
-from api.courses.serializers import CourseSerializer, CourseThemeSerializer, LessonSerializer, LessonMaterialSerializer, \
-    LessonGetSerializer
+from api.courses.serializers import CourseSerializer, CourseThemeSerializer, LessonSerializer, LessonMaterialSerializer
 from api.users.permissions import IsTeacherUser, IsOwnerUser
-from api.courses.permissions import IsBoughtUserOrOwner
+from api.courses.permissions import IsBoughtOrFree
 
 
 class CourseListCreateView(generics.ListCreateAPIView):
@@ -22,108 +22,166 @@ class CourseListCreateView(generics.ListCreateAPIView):
             return [IsAuthenticated(), IsTeacherUser()]
         return super().get_permissions()
 
-
-class DeleteUpdateCourseView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Course.objects.all()
-    serializer_class = CourseSerializer
-    permission_classes = [IsOwnerUser, IsAuthenticated]
-    http_method_names = ['get', 'patch', 'delete']
-    lookup_url_kwarg = 'course_name'
-
-    def update(self, request, *args, **kwargs):
-        instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
-        return Response(serializer.data)
-
-    def perform_update(self, serializer):
-        serializer.save(user=self.request.user)
-
-    def get_object(self):
-        course_name = self.kwargs.get('course_name')
-        return get_object_or_404(Course, name=course_name, user=self.request.user)
+    def list(self, request, *args, **kwargs):
+        queryset = Course.objects.all()
+        serializer = CourseSerializer(queryset, many=True)
+        response_data = []
+        for obj in serializer.data:
+            response_data.append({"id": obj["id"],
+                                  "image": obj["image"],
+                                  "name": obj["name"],
+                                  "price": obj["price"]
+                                  })
+        return Response(response_data)
 
 
-class CourseThemeListView(
-    generics.ListCreateAPIView
-
+class CourseAndThemeView(
+    generics.GenericAPIView,
+    mixins.RetrieveModelMixin,
+    mixins.CreateModelMixin,
+    mixins.DestroyModelMixin,
+    mixins.UpdateModelMixin,
 ):
     queryset = CourseTheme.objects.all()
-    serializer_class = CourseThemeSerializer
-    lookup_field = 'course_name'
+    serializer_class_map = {
+        "GET": CourseThemeSerializer,
+        "POST": CourseThemeSerializer,
+        "DELETE": CourseSerializer,
+        "PUT": CourseSerializer,
+    }
+    lookup_url_kwarg = 'course_name'
+
+    def get_serializer_class(self):
+        """
+        Return the serializer class based on the HTTP method.
+        """
+        return self.serializer_class_map.get(self.request.method)
 
     def get_permissions(self):
         if self.request.method == 'GET':
             return [AllowAny()]
-        elif self.request.method in ['POST']:
-            return [IsAuthenticated(), IsOwnerUser()]
-        return super().get_permissions()
+        elif self.request.method in ['POST', 'PUT', 'DELETE']:
+            return [IsOwnerUser()]
+        return []
 
-    def get_queryset(self):
-        course_name = self.kwargs.get('course_name')
-        try:
-            course = Course.objects.get(name=course_name)
-            course_themes = CourseTheme.objects.filter(course=course)
-            return course_themes
-        except Course.DoesNotExist:
-            raise Http404("Course not found")
-
-    def create(self, request, *args, **kwargs):
-        course_name = kwargs.get('course_name')
-        course = Course.objects.get(name=course_name)
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer, course)
-        headers = self.get_success_headers(serializer.data)
-        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
-
-    def perform_create(self, serializer, course):
-        serializer.save(course=course)
-
-    def list(self, request, *args, **kwargs):
+    def get_course_object(self):
         course_name = self.kwargs.get('course_name')
         course = get_object_or_404(Course, name=course_name)
-        course_themes = CourseTheme.objects.filter(course=course)
-        course_serializer = CourseSerializer(course)
+        return course
 
-        response_data = {
-            "course": course_serializer.data['name'],
-            "course_themes": [],
-        }
+    def put(self, request, *args, **kwargs):
+        course = self.get_course_object()
+        self.check_object_permissions(request, course)
+        return self.partial_update(request, *args, **kwargs)
+
+    def delete(self, request, *args, **kwargs):
+        course = self.get_course_object()
+        self.check_object_permissions(request, course)
+        return self.destroy(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        course = self.get_course_object()
+        self.check_object_permissions(request, course)
+        theme_serializer = self.get_serializer(data=request.data)
+        theme_serializer.is_valid(raise_exception=True)
+        self.perform_create(theme_serializer)
+        return Response(theme_serializer.data, status=status.HTTP_201_CREATED)
+
+    def get(self, request, *args, **kwargs):
+        course = self.get_course_object()
+        course_serializer = CourseSerializer(course).data
+        course_themes = CourseTheme.objects.filter(course=course)
+        course_theme_data = []
 
         for course_theme in course_themes:
-            theme_data = CourseThemeSerializer(course_theme).data
-            lesson_qs = Lesson.objects.filter(course_theme=course_theme)
-            lesson_serializer = LessonGetSerializer(lesson_qs, many=True)
-            theme_data['lessons'] = lesson_serializer.data
-            response_data["course_themes"].append(theme_data)
+            temp_response_lesson = []
+            lessons = Lesson.objects.filter(course_theme=course_theme).order_by("lesson_number").all()
+            temp_duration_of_theme = datetime.timedelta()
 
-        return Response(response_data)
+            for idx, lesson in enumerate(lessons, start=1):
+                total_seconds = int(lesson.duration.total_seconds())
+                hours, remainder = divmod(total_seconds, 3600)
+                minutes, _ = divmod(remainder, 60)
+                duration_str = "{:02}:{:02}".format(hours, minutes)
+                temp_lesson_dict = {
+                    "id": lesson.id,
+                    "title": lesson.title,
+                    "link": lesson.video_link,
+                    "lesson_number": idx,
+                    "duration": duration_str,
+                    "is_prime": lesson.is_prime
+                }
+                temp_duration_of_theme += lesson.duration
+                temp_response_lesson.append(temp_lesson_dict)
+
+            total_seconds = int(temp_duration_of_theme.total_seconds())
+            hours, remainder = divmod(total_seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
+            duration_str = "{:02}:{:02}".format(hours, minutes)
+
+            temp_theme_dict = {
+                "title": course_theme.title,
+                "count_lessons": lessons.count(),
+                "duration": duration_str,
+                'lessons': temp_response_lesson
+            }
+            course_theme_data.append(temp_theme_dict)
+
+        course_serializer['course_themes'] = course_theme_data
+
+        return Response(course_serializer)
+
+    def perform_create(self, serializer):
+        course = self.get_course_object()
+        serializer.save(course=course)
 
 
-class RetrieveUpdateDeleteThemeView(generics.RetrieveUpdateDestroyAPIView):
+class ThemeAndLessonView(generics.GenericAPIView,
+                         mixins.CreateModelMixin,
+                         mixins.UpdateModelMixin,
+                         mixins.DestroyModelMixin):
     queryset = CourseTheme.objects.all()
-    serializer_class = CourseThemeSerializer
-    permission_classes = [IsOwnerUser, IsAuthenticated]
-    http_method_names = ['get', 'patch', 'delete']
+    serializer_class_map = {
+        "POST": LessonSerializer,
+        "PUT": CourseThemeSerializer,
+        "DELETE": CourseThemeSerializer
+    }
     lookup_url_kwarg = 'theme_name'
 
+    def get_serializer_class(self):
+        """
+         Return the serializer class based on the HTTP method.
+        """
+        return self.serializer_class_map.get(self.request.method)
+
+    def get_permissions(self):
+        return [IsOwnerUser()]
+
+    def get_course_object(self):
+        course_name = self.kwargs['course_name']
+        course = get_object_or_404(Course, name=course_name)
+        return course
+
     def get_object(self):
-        course_theme = self.kwargs['course_name']
-        course = get_object_or_404(Course, name=course_theme)
+        course = self.get_course_object()
+        self.check_object_permissions(self.request, course)
         theme_name = self.kwargs['theme_name']
         return get_object_or_404(CourseTheme, title=theme_name, course=course)
 
-    def get_permissions(self):
-        return super().get_permissions()
+    def post(self, request, *args, **kwargs):
+        course = self.get_course_object()
+        self.check_object_permissions(request, course)
+        return self.create(request, *args, **kwargs)
 
+    def delete(self, request, *args, **kwargs):
+        course = self.get_course_object()
+        self.check_object_permissions(request, course)
+        return self.destroy(request, *args, **kwargs)
 
-class CreateLessonView(generics.CreateAPIView):
-    queryset = Lesson.objects.all()
-    serializer_class = LessonSerializer
-    permission_classes = [IsOwnerUser, IsAuthenticated]
-    lookup_url_kwarg = 'theme_name'
+    def put(self, request, *args, **kwargs):
+        course = self.get_course_object()
+        self.check_object_permissions(request, course)
+        return self.partial_update(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         course_name = self.kwargs['course_name']
@@ -136,37 +194,58 @@ class CreateLessonView(generics.CreateAPIView):
         serializer.save(course_theme=course_theme, lesson_number=lesson_count)
 
 
-class RetrieveUpdateDeleteLessonView(generics.RetrieveUpdateDestroyAPIView):
+class RetrieveUpdateDeleteLessonView(generics.RetrieveUpdateDestroyAPIView, mixins.CreateModelMixin):
     queryset = Lesson.objects.all()
-    serializer_class = LessonSerializer
-    http_method_names = ['get', 'patch', 'delete']
+    serializer_class_map = {
+        "GET": CourseThemeSerializer,
+        "POST": LessonSerializer,
+        "PUT": CourseThemeSerializer,
+        "DELETE": CourseThemeSerializer
+    }
+    http_method_names = ['get', 'post', 'patch', 'delete']
     lookup_url_kwarg = 'lesson_id'
 
+    def get_serializer_class(self):
+        """
+        Return the serializer class based on the HTTP method.
+        """
+        return self.serializer_class_map.get(self.request.method)
+
+    def get_course_object(self):
+        course_name = self.kwargs.get('course_name')
+        course = Course.objects.get(name=course_name)
+        return course
+
+    def get_course_theme(self):
+        course = self.get_course_object()
+        theme_name = self.kwargs['theme_name']
+        theme = get_object_or_404(CourseTheme, title=theme_name, course=course)
+        return theme
+
     def get_object(self):
-        lesson = get_object_or_404(Lesson, pk=self.kwargs['lesson_id'])
+        theme = self.get_course_theme()
+        lesson = get_object_or_404(Lesson, pk=self.kwargs['lesson_id'], course=theme)
         return lesson
 
     def get(self, request, *args, **kwargs):
         lesson = self.get_object()
+        self.check_object_permissions(request, lesson)
         lesson_materials = LessonMaterial.objects.filter(lesson=lesson)
         serializer = LessonMaterialSerializer(lesson_materials, many=True)
         lesson_serializer = LessonSerializer(lesson)
-        return Response({"lesson": lesson_serializer.data, "materials": serializer.data})
+        lesson_serializer.data['materials'] = serializer.data
+        return Response({"lesson": lesson_serializer.data})
+
+    def post(self, request, *args, **kwargs):
+        return self.perform_create(request)
 
     def get_permissions(self):
-        if self.request.method in ['PATCH', 'DELETE']:
+        if self.request.method in ['PATCH', 'DELETE', 'POST']:
             return [IsAuthenticated(), IsOwnerUser()]
-        return [IsBoughtUserOrOwner()]
-
-
-class LessonMaterialCreateView(generics.CreateAPIView):
-    queryset = LessonMaterial.objects.all()
-    serializer_class = LessonMaterialSerializer
-    lookup_url_kwarg = 'lesson_id'
+        return [IsBoughtOrFree()]
 
     def perform_create(self, serializer):
-        lesson = self.kwargs['lesson_id']
-        lesson = get_object_or_404(Lesson, pk=lesson)
+        lesson = self.get_object()
         serializer.save(lesson=lesson)
 
 
@@ -174,6 +253,6 @@ class LessonMaterialsRUDView(generics.RetrieveUpdateDestroyAPIView):
     queryset = LessonMaterial.objects.all()
     serializer_class = LessonMaterialSerializer
 
-    http_method_names = ['get', 'patch', 'delete']
+    http_method_names = ['patch', 'delete']
     permission_classes = [IsAuthenticated, IsOwnerUser]
     lookup_url_kwarg = 'material_id'

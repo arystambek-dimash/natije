@@ -15,7 +15,7 @@ from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
+TOKEN = "6477471792:AAFYoVHTqfv42RathsqVEKDBBAupSUrlAvc"
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
@@ -28,7 +28,6 @@ DEBUG = True
 ALLOWED_HOSTS = []
 
 # Application definition
-
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -39,12 +38,14 @@ INSTALLED_APPS = [
     'api.courses.apps.CoursesConfig',
     'api.users.apps.UsersConfig',
     'api.quizzes.apps.QuizzesConfig',
+    'api.tg_shop_bot.apps.TgShopBotConfig',
     'rest_framework',
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     'drf_yasg',
     'djoser',
     "corsheaders",
+    'adrf'
 ]
 
 MIDDLEWARE = [
@@ -55,6 +56,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'silk.middleware.SilkyMiddleware',
 ]
 
 ROOT_URLCONF = 'natije.urls'
@@ -84,6 +86,7 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        'CONN_MAX_AGE': 500
     }
 }
 

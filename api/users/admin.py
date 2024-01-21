@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from api.users.models import Role
+from api.users.models import Role,Profile
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth import get_user_model
 
@@ -26,3 +26,4 @@ class CustomUserAdmin(BaseUserAdmin):
 
 admin.site.register(get_user_model(), CustomUserAdmin)
 admin.site.register(Role)
+admin.site.register(Profile)
